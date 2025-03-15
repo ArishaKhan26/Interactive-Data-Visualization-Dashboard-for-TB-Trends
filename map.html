@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TB Map Chart</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    .tooltip {
+      position: absolute;
+      background: white;
+      border: 1px solid black;
+      padding: 5px;
+      pointer-events: none;
+      font-size: 12px;
+    }
+    #map {
+      width: 100%;
+      height: 600px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="tooltip" style="display: none;"></div>
+  <script>
+    const width = window.innerWidth, height = 600;
+    // SVG container
+    const svg = d3.select("#map")
+                    .append("svg")
+                    .attr("width", width)
+                    .attr("height", height);
+
+    // Set up the projection and path
+    const projection = d3.geoMercator()
+      .scale(130)
+      .translate([width / 2, height / 1.5]);
+
+    const path = d3.geoPath().projection(projection);
+
+    // Define color scales for TB Treatment Success Rate
+    const colorScaleSuccess = d3.scaleSequential()
+      .domain([0, 100])
+      .interpolator(d3.interpolateBlues);
+
+    // Tooltip
+    const tooltip = d3.select(".tooltip");
+
+    // Zoom functionality
+    const zoomed = function(event) {
+      svg.selectAll("path")
+              .attr("transform", event.transform);
+    };
+
+    const zoom = d3.zoom()
+                    .scaleExtent([1, 8]) // Min and max zoom levels
+                    .on("zoom", zoomed);
+
+    svg.call(zoom);
+
+    const excludedRegions = new Set([
+      "USA", "Canada", "Mexico", "Brazil", "Argentina", "Colombia", "Chile", "Peru", 
+      "Venezuela", "Bolivia", "Paraguay", "Uruguay", "Ecuador", "Guyana", "Suriname", 
+      "French Guiana", "Russia", "Greenland", "Australia", "New Zealand", "C", "Antarctica"
+    ]);
+
+    // GeoJSON data
+    Promise.all([
+      d3.json("https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson"), // World map
+      d3.csv("map.csv") 
+    ]).then(([geojson, data]) => {
+
+      const tbData = {};
+      data.forEach(d => {
+        const country = d.Country;
+        if (d["DR-TB Treatment Success Rate"] !== "NULL" && d["DR-TB Treatment Success Rate"] !== "") {
+          tbData[country] = +d["DR-TB Treatment Success Rate"];
+        }
+      });
+
+      // Filter out excluded regions
+      const filteredFeatures = geojson.features.filter(
+        d => !excludedRegions.has(d.properties.name)
+      );
+
+      // Draw map :)
+      svg.selectAll("path")
+                .data(filteredFeatures)
+                .join("path")
+                .attr("d", path)
+                .attr("fill", d => {
+                    const countryData = tbData[d.properties.name];
+                    const rate = countryData !== undefined ? countryData : 0;
+                    return colorScaleSuccess(rate);
+                })
+                .attr("stroke", "#000")
+                .on("mouseover", (event, d) => {
+                    // Change stroke to yellow on hover
+                    d3.select(event.target)
+                      .attr("stroke", "yellow")
+                      .attr("stroke-width", 3);
+
+                    const countryData = tbData[d.properties.name];
+                    tooltip.style("display", "block")
+                        .style("left", `${event.pageX + 5}px`)
+                        .style("top", `${event.pageY + 5}px`)
+                        .html(`
+                                <strong>${d.properties.name}</strong><br>
+                                Success Rate: ${countryData ? countryData + "%" : "No Data"}
+                                `);
+                })
+                .on("mouseout", (event, d) => {
+                    // Remove yellow border when mouse leaves
+                    d3.select(event.target)
+                      .attr("stroke", "#000") // Reset to original stroke color
+                      .attr("stroke-width", 1);
+
+                    tooltip.style("display", "none");
+                });
+
+      // Legend for the treatment success rate
+      const legendWidth = 300, legendHeight = 10;
+      const legendSvg = svg.append("g")
+                            .attr("transform", `translate(${width - legendWidth - 20},${height - 40})`);
+
+      const legendScaleSuccess = d3.scaleLinear()
+                                    .domain([0, 100]) // Set domain explicitly
+                                    .range([0, legendWidth]);
+
+      // Create a gradient for the legend
+      const legendGradient = legendSvg.append("defs")
+                                      .append("linearGradient")
+                                      .attr("id", "legend-gradient")
+                                      .attr("x1", "0%")
+                                      .attr("x2", "100%")
+                                      .attr("y1", "0%")
+                                      .attr("y2", "0%");
+
+      legendGradient.append("stop")
+                    .attr("offset", "0%")
+                    .attr("stop-color", colorScaleSuccess(0));
+
+      legendGradient.append("stop")
+                    .attr("offset", "100%")
+                    .attr("stop-color", colorScaleSuccess(100));
+
+      legendSvg.append("rect")
+               .attr("x", 0)
+               .attr("y", 0)
+               .attr("width", legendWidth)
+               .attr("height", legendHeight)
+               .style("fill", "url(#legend-gradient)");
+
+      const legendAxisSuccess = d3.axisBottom(legendScaleSuccess)
+                                    .ticks(5)
+                                    .tickFormat(d => d + "%");
+
+      legendSvg.append("g")
+                    .attr("transform", `translate(0,${legendHeight})`)
+                    .call(legendAxisSuccess);
+
+      // Add a label for the legend
+      legendSvg.append("text")
+               .attr("x", legendWidth / 2)
+               .attr("y", -5)
+               .attr("text-anchor", "middle")
+               .attr("font-size", "12px")
+               .attr("font-weight", "bold")
+               .text("TB Treatment Success Rate");
+                }).catch(error => console.error("Error loading data:", error));
+  </script>
+</body>
+</html>
